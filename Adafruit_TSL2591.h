@@ -123,6 +123,11 @@ typedef enum
 }
 tsl2591Gain_t;
 
+/// Enumeration for getFullLuminosity()
+enum TSL2591_GFL_MODE
+{
+  TSL2591_GFL_DEFAULT,TSL2591_GFL_INIT,TSL2591_GFL_WAIT,TSL2591_GFL_DONE
+};
 
 /**************************************************************************/
 /*! 
@@ -138,11 +143,14 @@ class Adafruit_TSL2591 : public Adafruit_Sensor
   void      enable  ( void );
   void      disable ( void );
 
-  float     calculateLux  ( uint16_t ch0, uint16_t ch1 );
-  void      setGain       ( tsl2591Gain_t gain );
-  void      setTiming     ( tsl2591IntegrationTime_t integration );
-  uint16_t  getLuminosity (uint8_t channel );
-  uint32_t  getFullLuminosity ( );
+  float     calculateLux         ( uint16_t ch0, uint16_t ch1 );
+  bool      autoscale            ( uint16_t ch0, uint16_t ch1 );
+  uint16_t  temperatureCorrectCh0( float temperature, uint16_t ch0 );
+  uint16_t  temperatureCorrectCh1( float temperature, uint16_t ch1 );
+  void      setGain              ( tsl2591Gain_t gain );
+  void      setTiming            ( tsl2591IntegrationTime_t integration );
+  uint16_t  getLuminosity        ( uint8_t channel );
+  uint32_t  getFullLuminosity    ( TSL2591_GFL_MODE mode = TSL2591_GFL_DEFAULT );
 
   tsl2591IntegrationTime_t getTiming();
   tsl2591Gain_t            getGain();
@@ -163,8 +171,12 @@ class Adafruit_TSL2591 : public Adafruit_Sensor
   uint8_t   read8   ( uint8_t reg );
 
   tsl2591IntegrationTime_t _integration;
+  tsl2591IntegrationTime_t __integration;
   tsl2591Gain_t _gain;
+  tsl2591Gain_t __gain;
   int32_t _sensorID;
+  uint32_t _gflTime;
+  int16_t _sensitivity = 0;
 
   boolean _initialized;
 };

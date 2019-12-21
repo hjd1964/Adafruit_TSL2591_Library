@@ -298,11 +298,87 @@ float Adafruit_TSL2591::calculateLux(uint16_t ch0, uint16_t ch1)
 
 /************************************************************************/
 /*!
+    @brief  Adjusts gain/integration time based on the two light sensors
+    @param  ch0 Data from channel 0 (IR+Visible)
+    @param  ch1 Data from channel 1 (IR)
+    @returns True if success, False if reading full scale (saturated, no sig, etc.)
+*/
+/**************************************************************************/
+bool Adafruit_TSL2591::autoscale(uint16_t ch0, uint16_t ch1)
+{
+  // check if we need to adjust sensitivity
+  bool over=false, under=false;
+  if (ch0 > 0x7000 || ch1 > 0x7000) over=true; else if (ch0 < 0x0800 || ch1 < 0x0800) under=true;
+  if (over && _sensitivity > 0) _sensitivity--; else if (under && _sensitivity < 23) _sensitivity++;
+
+  // adjust sensitivity
+  switch (_sensitivity) {
+  case  0: __integration=TSL2591_INTEGRATIONTIME_100MS; __gain=TSL2591_GAIN_LOW; break;
+  case  1: __integration=TSL2591_INTEGRATIONTIME_200MS; __gain=TSL2591_GAIN_LOW; break;
+  case  2: __integration=TSL2591_INTEGRATIONTIME_300MS; __gain=TSL2591_GAIN_LOW; break;
+  case  3: __integration=TSL2591_INTEGRATIONTIME_400MS; __gain=TSL2591_GAIN_LOW; break;
+  case  4: __integration=TSL2591_INTEGRATIONTIME_500MS; __gain=TSL2591_GAIN_LOW; break;
+  case  5: __integration=TSL2591_INTEGRATIONTIME_600MS; __gain=TSL2591_GAIN_LOW; break;
+  case  6: __integration=TSL2591_INTEGRATIONTIME_100MS; __gain=TSL2591_GAIN_MED; break;
+  case  7: __integration=TSL2591_INTEGRATIONTIME_200MS; __gain=TSL2591_GAIN_MED; break;
+  case  8: __integration=TSL2591_INTEGRATIONTIME_300MS; __gain=TSL2591_GAIN_MED; break;
+  case  9: __integration=TSL2591_INTEGRATIONTIME_400MS; __gain=TSL2591_GAIN_MED; break;
+  case 10: __integration=TSL2591_INTEGRATIONTIME_500MS; __gain=TSL2591_GAIN_MED; break;
+  case 11: __integration=TSL2591_INTEGRATIONTIME_600MS; __gain=TSL2591_GAIN_MED; break;
+  case 12: __integration=TSL2591_INTEGRATIONTIME_100MS; __gain=TSL2591_GAIN_HIGH; break;
+  case 13: __integration=TSL2591_INTEGRATIONTIME_200MS; __gain=TSL2591_GAIN_HIGH; break;
+  case 14: __integration=TSL2591_INTEGRATIONTIME_300MS; __gain=TSL2591_GAIN_HIGH; break;
+  case 15: __integration=TSL2591_INTEGRATIONTIME_400MS; __gain=TSL2591_GAIN_HIGH; break;
+  case 16: __integration=TSL2591_INTEGRATIONTIME_500MS; __gain=TSL2591_GAIN_HIGH; break;
+  case 17: __integration=TSL2591_INTEGRATIONTIME_600MS; __gain=TSL2591_GAIN_HIGH; break;
+  case 18: __integration=TSL2591_INTEGRATIONTIME_100MS; __gain=TSL2591_GAIN_MAX; break;
+  case 19: __integration=TSL2591_INTEGRATIONTIME_200MS; __gain=TSL2591_GAIN_MAX; break;
+  case 20: __integration=TSL2591_INTEGRATIONTIME_300MS; __gain=TSL2591_GAIN_MAX; break;
+  case 21: __integration=TSL2591_INTEGRATIONTIME_400MS; __gain=TSL2591_GAIN_MAX; break;
+  case 22: __integration=TSL2591_INTEGRATIONTIME_500MS; __gain=TSL2591_GAIN_MAX; break;
+  case 23: __integration=TSL2591_INTEGRATIONTIME_600MS; __gain=TSL2591_GAIN_MAX; break;
+  }
+
+  // only send up integration and/or gain if it has changed
+  if (_integration != __integration) setTiming(__integration);
+  if (_gain != __gain) setGain(__gain);
+
+  return (ch0 <= 0x7FFF && ch1 <= 0x7FFF && ch0 != 0x0000 && ch1 != 0x0000);
+}
+
+/************************************************************************/
+/*!
+    @brief  Correct channel 0 for ambient temperature effects
+    @param  temperature in degrees C
+    @param  ch0 Data from channel 0 (IR+Visible)
+    @returns True if success, False if reading full scale (saturated, no sig, etc.)
+*/
+/**************************************************************************/
+uint16_t Adafruit_TSL2591::temperatureCorrectCh0(float temperature, uint16_t ch0) {
+  float f = 0.975 + temperature * 0.00085; // typical values for intercept and slope according to datasheet
+  return ch0 * f;
+}
+
+/************************************************************************/
+/*!
+    @brief  Correct channel 1 for ambient temperature effects
+    @param  temperature in degrees C
+    @param  ch1 Data from channel 1 (IR)
+    @returns True if success, False if reading full scale (saturated, no sig, etc.)
+*/
+/**************************************************************************/
+uint16_t Adafruit_TSL2591::temperatureCorrectCh1(float temperature, uint16_t ch1) {
+  float f = 1.05 + temperature * -0.0019; // typical values for intercept and slope according to datasheet
+  return ch1 * f;
+}
+
+/************************************************************************/
+/*!
     @brief  Reads the raw data from both light channels
     @returns 32-bit raw count where high word is IR, low word is IR+Visible
 */
 /**************************************************************************/
-uint32_t Adafruit_TSL2591::getFullLuminosity (void)
+uint32_t Adafruit_TSL2591::getFullLuminosity (TSL2591_GFL_MODE mode)
 {
   if (!_initialized) {
     if (!begin()) {
@@ -310,27 +386,33 @@ uint32_t Adafruit_TSL2591::getFullLuminosity (void)
     }
   }
 
-  // Enable the device
-  enable();
-
-  // Wait x ms for ADC to complete
-  for (uint8_t d=0; d<=_integration; d++)
-  {
-    delay(120);
+  if (mode == TSL2591_GFL_DEFAULT || mode == TSL2591_GFL_INIT) {
+    // Enable the device
+	enable();
+	if (mode == TSL2591_GFL_INIT) { _gflTime=millis(); return 1; }
   }
 
-  // CHAN0 must be read before CHAN1
-  // See: https://forums.adafruit.com/viewtopic.php?f=19&t=124176
-  uint32_t x;
-  uint16_t y;
-  y = read16(TSL2591_COMMAND_BIT | TSL2591_REGISTER_CHAN0_LOW);
-  x = read16(TSL2591_COMMAND_BIT | TSL2591_REGISTER_CHAN1_LOW);
-  x <<= 16;
-  x |= y;
+  if (mode == TSL2591_GFL_DEFAULT) {
+    // Wait x ms for ADC to complete
+    for (uint8_t d=0; d<=_integration; d++) delay(120);
+  } else
+  if (mode == TSL2591_GFL_WAIT) {
+    if ((long)(millis()-(_gflTime+_integration*120L)) < 0L) return 1; else return 0;
+  }
 
-  disable();
+  if (mode == TSL2591_GFL_DEFAULT || mode == TSL2591_GFL_DONE) {
+    // CHAN0 must be read before CHAN1
+    // See: https://forums.adafruit.com/viewtopic.php?f=19&t=124176
+    uint32_t x;
+    uint16_t y;
+    y = read16(TSL2591_COMMAND_BIT | TSL2591_REGISTER_CHAN0_LOW);
+    x = read16(TSL2591_COMMAND_BIT | TSL2591_REGISTER_CHAN1_LOW);
+    x <<= 16;
+    x |= y;
 
-  return x;
+    disable();
+    return x;
+  }
 }
 
 /************************************************************************/
